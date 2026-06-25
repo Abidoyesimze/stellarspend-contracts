@@ -113,6 +113,8 @@ pub mod ErrorCode {
     pub const INSUFFICIENT_BALANCE: u32 = 4;
     /// Arithmetic overflow
     pub const ARITHMETIC_OVERFLOW: u32 = 5;
+    /// Currency mismatch between source and destination
+    pub const CURRENCY_MISMATCH: u32 = 6;
 }
 
 /// Events emitted by the multi-currency wallet contract.

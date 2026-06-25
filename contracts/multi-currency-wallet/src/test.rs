@@ -2,6 +2,7 @@
 
 #![cfg(test)]
 
+use crate::validation::validate_currency_match;
 use crate::{MultiCurrencyWalletContract, MultiCurrencyWalletContractClient};
 use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, Symbol, Vec};
 
@@ -635,4 +636,141 @@ fn test_minimum_valid_balance() {
     assert_eq!(result.successful, 1);
     assert_eq!(result.failed, 0);
     assert_eq!(client.get_balance(&user, &symbol_short!("USDC")), 1);
+}
+
+#[test]
+fn test_validate_currency_match_same() {
+    let usdc = symbol_short!("USDC");
+    assert!(validate_currency_match(&usdc, &usdc).is_ok());
+}
+
+#[test]
+fn test_validate_currency_match_different_rejected() {
+    let usdc = symbol_short!("USDC");
+    let xlm = symbol_short!("XLM");
+    assert_eq!(
+        validate_currency_match(&usdc, &xlm),
+        Err(ErrorCode::CURRENCY_MISMATCH)
+    );
+}
+
+#[test]
+fn test_same_currency_transfer_succeeds() {
+    let (env, admin, client) = setup_test_contract();
+    let user = Address::generate(&env);
+
+    // Single batch: same-currency set operations succeed
+    let mut requests: Vec<BalanceUpdateRequest> = Vec::new(&env);
+    requests.push_back(create_valid_request(
+        &env,
+        &user,
+        symbol_short!("USDC"),
+        1000_000_000,
+        symbol_short!("set"),
+    ));
+
+    let result = client.batch_update_balances(&admin, &requests);
+    assert_eq!(result.successful, 1);
+    assert_eq!(result.failed, 0);
+    assert_eq!(
+        client.get_balance(&user, &symbol_short!("USDC")),
+        1000_000_000
+    );
+    assert_eq!(client.get_balance(&user, &symbol_short!("XLM")), 0);
+}
+
+#[test]
+fn test_cross_currency_balance_isolation() {
+    let (env, admin, client) = setup_test_contract();
+    let user = Address::generate(&env);
+
+    // Single batch: set multiple currencies for the same user
+    let mut requests: Vec<BalanceUpdateRequest> = Vec::new(&env);
+    requests.push_back(create_valid_request(
+        &env,
+        &user,
+        symbol_short!("USDC"),
+        1000_000_000,
+        symbol_short!("set"),
+    ));
+    requests.push_back(create_valid_request(
+        &env,
+        &user,
+        symbol_short!("XLM"),
+        5000_000_000,
+        symbol_short!("set"),
+    ));
+
+    let result = client.batch_update_balances(&admin, &requests);
+    assert_eq!(result.total_requests, 2);
+    assert_eq!(result.successful, 2);
+    assert_eq!(result.failed, 0);
+
+    // Both balances should coexist without interference
+    assert_eq!(
+        client.get_balance(&user, &symbol_short!("USDC")),
+        1000_000_000
+    );
+    assert_eq!(
+        client.get_balance(&user, &symbol_short!("XLM")),
+        5000_000_000
+    );
+}
+
+#[test]
+fn test_cross_currency_batch_operations() {
+    let (env, admin, client) = setup_test_contract();
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+
+    let mut requests: Vec<BalanceUpdateRequest> = Vec::new(&env);
+
+    // User1 gets USDC
+    requests.push_back(create_valid_request(
+        &env,
+        &user1,
+        symbol_short!("USDC"),
+        1000_000_000,
+        symbol_short!("set"),
+    ));
+
+    // User2 gets XLM
+    requests.push_back(create_valid_request(
+        &env,
+        &user2,
+        symbol_short!("XLM"),
+        5000_000_000,
+        symbol_short!("set"),
+    ));
+
+    // Same user (user1) gets EURC - cross-currency for same user in single batch
+    requests.push_back(create_valid_request(
+        &env,
+        &user1,
+        symbol_short!("EURC"),
+        750_000_000,
+        symbol_short!("set"),
+    ));
+
+    let result = client.batch_update_balances(&admin, &requests);
+    assert_eq!(result.total_requests, 3);
+    assert_eq!(result.successful, 3);
+    assert_eq!(result.failed, 0);
+
+    // Verify all cross-currency balances are correctly stored
+    assert_eq!(
+        client.get_balance(&user1, &symbol_short!("USDC")),
+        1000_000_000
+    );
+    assert_eq!(
+        client.get_balance(&user1, &symbol_short!("EURC")),
+        750_000_000
+    );
+    assert_eq!(
+        client.get_balance(&user2, &symbol_short!("XLM")),
+        5000_000_000
+    );
+
+    // Verify user2's USDC balance remains 0 (not affected)
+    assert_eq!(client.get_balance(&user2, &symbol_short!("USDC")), 0);
 }

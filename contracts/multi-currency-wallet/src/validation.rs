@@ -1,5 +1,6 @@
 //! Validation logic for balance update requests.
 
+use alloc::string::ToString;
 use soroban_sdk::{Address, Env, Symbol};
 
 use crate::types::{BalanceUpdateRequest, DataKey, ErrorCode, MAX_BALANCE, MIN_BALANCE};
@@ -31,6 +32,23 @@ pub fn validate_balance_request(request: &BalanceUpdateRequest) -> Result<(), u3
     }
 
     Ok(())
+}
+
+/// Validates that two currency symbols match.
+///
+/// # Arguments
+/// * `currency` - The currency to validate
+/// * `expected` - The expected currency
+///
+/// # Returns
+/// * `Ok(())` if currencies match
+/// * `Err(CURRENCY_MISMATCH)` if currencies don't match
+pub fn validate_currency_match(currency: &Symbol, expected: &Symbol) -> Result<(), u32> {
+    if currency == expected {
+        Ok(())
+    } else {
+        Err(ErrorCode::CURRENCY_MISMATCH)
+    }
 }
 
 /// Validates that an address is valid.
@@ -182,6 +200,22 @@ mod tests {
         assert!(!is_valid_amount(MIN_BALANCE - 1));
         assert!(!is_valid_amount(0));
         assert!(!is_valid_amount(-1000));
+    }
+
+    #[test]
+    fn test_currency_match_same() {
+        let usdc = symbol_short!("USDC");
+        assert!(validate_currency_match(&usdc, &usdc).is_ok());
+    }
+
+    #[test]
+    fn test_currency_match_different() {
+        let usdc = symbol_short!("USDC");
+        let xlm = symbol_short!("XLM");
+        assert_eq!(
+            validate_currency_match(&usdc, &xlm),
+            Err(ErrorCode::CURRENCY_MISMATCH)
+        );
     }
 
     #[test]
