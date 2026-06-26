@@ -54,6 +54,8 @@ autotests = false
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
+budget = { path = "contracts/budget", features = ["testutils"] }
+spending-limits = { path = "contracts/spending-limits", features = ["testutils"] }
 
 [[test]]
 name = "snapshot_tests"
@@ -74,6 +76,10 @@ path = "tests/rate_limit_tests.rs"
 [[test]]
 name = "concurrent_spending_tests"
 path = "contracts/tests/concurrent_spending_tests.rs"
+
+[[test]]
+name = "budget_spending_limits_test"
+path = "contracts/tests/budget_spending_limits_test.rs"
 
 [workspace.package]
 version = "0.1.0"
