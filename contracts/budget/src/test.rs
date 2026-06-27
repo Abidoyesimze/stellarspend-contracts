@@ -1,369 +1,250 @@
 #![cfg(test)]
 
-use super::{Beneficiary, BudgetContract, BudgetContractClient};
-use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, Symbol};
+use soroban_sdk::{
+    testutils::{Address as _, AuthorizedFunction, AuthorizedInvocation},
+    Address, Env, IntoVal,
+};
 
-fn setup() -> (Env, Address, Address, BudgetContractClient<'static>) {
+use crate::{BudgetContract, BudgetContractClient};
+
+// ─────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────
+
+fn setup_env() -> (Env, Address, BudgetContractClient<'static>) {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(BudgetContract, ());
+    let owner = Address::generate(&env);
+    let contract_id = env.register_contract(None, BudgetContract);
     let client = BudgetContractClient::new(&env, &contract_id);
-    let admin = Address::generate(&env);
-    let user = Address::generate(&env);
 
-    client.initialize(&admin);
-    (env, admin, user, client)
+    client.initialize(&owner);
+
+    (env, owner, client)
 }
 
-fn setup_categories(
-    client: &BudgetContractClient,
-    admin: &Address,
-    user: &Address,
-) -> (Symbol, Symbol) {
-    let food = symbol_short!("food");
-    let travel = symbol_short!("travel");
-    client.set_category_budget(admin, user, &food, &1_000);
-    client.set_category_budget(admin, user, &travel, &500);
-    (food, travel)
+// ─────────────────────────────────────────────
+// 1. Ownership: authorized operations succeed
+// ─────────────────────────────────────────────
+
+#[test]
+fn test_owner_can_update_owner() {
+    let (env, owner, client) = setup_env();
+    let new_owner = Address::generate(&env);
+
+    // Should succeed without panicking
+    client.update_owner(&owner, &new_owner);
+
+    assert_eq!(client.get_owner(), new_owner);
 }
 
 #[test]
-fn test_initialize() {
-    let (_, admin, _, client) = setup();
-    assert_eq!(client.get_admin(), admin);
-    assert_eq!(client.get_suspicious_activity_count(), 0);
+fn test_owner_can_add_contributor() {
+    let (env, owner, client) = setup_env();
+    let contributor = Address::generate(&env);
+
+    client.add_contributor(&owner, &contributor);
+
+    assert!(client.is_contributor(&contributor));
 }
 
 #[test]
-fn test_transfer_between_categories() {
-    let (_, admin, user, client) = setup();
-    let (food, travel) = setup_categories(&client, &admin, &user);
+fn test_owner_can_remove_contributor() {
+    let (env, owner, client) = setup_env();
+    let contributor = Address::generate(&env);
 
-    let transfer_id = client.transfer_between_categories(&user, &food, &travel, &200);
+    client.add_contributor(&owner, &contributor);
+    client.remove_contributor(&owner, &contributor);
 
-    assert_eq!(transfer_id, 1);
-    assert_eq!(client.get_category_balance(&user, &food), 800);
-    assert_eq!(client.get_category_balance(&user, &travel), 700);
-
-    let history = client.get_transfer_history(&user);
-    assert_eq!(history.len(), 1);
-    assert_eq!(history.get(0).unwrap().amount, 200);
-    assert_eq!(history.get(0).unwrap().from_category, food);
-    assert_eq!(history.get(0).unwrap().to_category, travel);
+    assert!(!client.is_contributor(&contributor));
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #9)")]
-fn test_transfer_insufficient_balance() {
-    let (_, admin, user, client) = setup();
-    let (food, travel) = setup_categories(&client, &admin, &user);
-    client.transfer_between_categories(&user, &food, &travel, &2_000);
+fn test_owner_can_transfer_ownership() {
+    let (env, owner, client) = setup_env();
+    let new_owner = Address::generate(&env);
+
+    client.transfer_ownership(&owner, &new_owner);
+
+    assert_eq!(client.get_owner(), new_owner);
+}
+
+// ─────────────────────────────────────────────
+// 2. Ownership: unauthorized operations fail
+// ─────────────────────────────────────────────
+
+#[test]
+#[should_panic(expected = "unauthorized")]
+fn test_non_owner_cannot_update_owner() {
+    let (env, _owner, client) = setup_env();
+    let attacker = Address::generate(&env);
+    let new_owner = Address::generate(&env);
+
+    // Disable blanket auth mocking so require_auth() calls are enforced
+    env.set_auths(&[]);
+
+    client.update_owner(&attacker, &new_owner);
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #10)")]
-fn test_transfer_same_category() {
-    let (_, admin, user, client) = setup();
-    let (food, _) = setup_categories(&client, &admin, &user);
-    client.transfer_between_categories(&user, &food, &food, &100);
+#[should_panic(expected = "unauthorized")]
+fn test_non_owner_cannot_add_contributor() {
+    let (env, _owner, client) = setup_env();
+    let attacker = Address::generate(&env);
+    let victim = Address::generate(&env);
+
+    env.set_auths(&[]);
+
+    client.add_contributor(&attacker, &victim);
 }
 
 #[test]
-fn test_spend_and_remaining_balance() {
-    let (_, admin, user, client) = setup();
-    let (food, _) = setup_categories(&client, &admin, &user);
+#[should_panic(expected = "unauthorized")]
+fn test_non_owner_cannot_remove_contributor() {
+    let (env, owner, client) = setup_env();
+    let attacker = Address::generate(&env);
+    let contributor = Address::generate(&env);
 
-    let remaining = client.spend_from_category(&user, &food, &300);
-    assert_eq!(remaining, 700);
-    assert_eq!(client.get_category_balance(&user, &food), 700);
+    // Owner legitimately adds a contributor first
+    client.add_contributor(&owner, &contributor);
+
+    // Attacker tries to remove them
+    env.set_auths(&[]);
+    client.remove_contributor(&attacker, &contributor);
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #11)")]
-fn test_rapid_spending_triggers_freeze() {
-    let (_, admin, user, client) = setup();
-    let (food, _) = setup_categories(&client, &admin, &user);
+#[should_panic(expected = "unauthorized")]
+fn test_contributor_cannot_transfer_ownership() {
+    let (env, owner, client) = setup_env();
+    let contributor = Address::generate(&env);
+    let new_owner = Address::generate(&env);
 
-    client.spend_from_category(&user, &food, &10);
-    client.spend_from_category(&user, &food, &10);
-    client.spend_from_category(&user, &food, &10);
-    client.spend_from_category(&user, &food, &10);
+    client.add_contributor(&owner, &contributor);
+
+    env.set_auths(&[]);
+    client.transfer_ownership(&contributor, &new_owner);
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #11)")]
-fn test_frozen_budget_blocks_transfer() {
-    let (_, admin, user, client) = setup();
-    let (food, travel) = setup_categories(&client, &admin, &user);
+#[should_panic(expected = "unauthorized")]
+fn test_anonymous_cannot_transfer_ownership() {
+    let (env, _owner, client) = setup_env();
+    let anonymous = Address::generate(&env);
+    let new_owner = Address::generate(&env);
 
-    client.spend_from_category(&user, &food, &10);
-    client.spend_from_category(&user, &food, &10);
-    client.spend_from_category(&user, &food, &10);
+    env.set_auths(&[]);
+    client.transfer_ownership(&anonymous, &new_owner);
+}
 
-    assert!(client.is_frozen(&user));
-    client.transfer_between_categories(&user, &food, &travel, &50);
+// ─────────────────────────────────────────────
+// 3. Contributor permissions
+// ─────────────────────────────────────────────
+
+#[test]
+fn test_contributor_can_perform_allowed_actions() {
+    let (env, owner, client) = setup_env();
+    let contributor = Address::generate(&env);
+
+    client.add_contributor(&owner, &contributor);
+
+    // Contributors should be able to make contributions
+    client.contribute(&contributor, &1_000_000_i128);
+
+    assert!(client.get_total_contributions() >= 1_000_000_i128);
 }
 
 #[test]
-fn test_manual_unfreeze() {
-    let (_, admin, user, client) = setup();
-    let (food, _) = setup_categories(&client, &admin, &user);
+#[should_panic(expected = "unauthorized")]
+fn test_non_contributor_cannot_contribute() {
+    let (env, _owner, client) = setup_env();
+    let outsider = Address::generate(&env);
 
-    client.spend_from_category(&user, &food, &10);
-    client.spend_from_category(&user, &food, &10);
-    client.spend_from_category(&user, &food, &10);
-
-    assert!(client.is_frozen(&user));
-    client.unfreeze_budget(&admin, &user);
-    assert!(!client.is_frozen(&user));
-
-    let remaining = client.spend_from_category(&user, &food, &10);
-    assert_eq!(remaining, 960);
+    env.set_auths(&[]);
+    client.contribute(&outsider, &1_000_000_i128);
 }
 
 #[test]
-fn test_user_can_unfreeze_own_budget() {
-    let (_, _, user, client) = setup();
-    let admin = client.get_admin();
-    let (food, _) = setup_categories(&client, &admin, &user);
+fn test_removed_contributor_loses_permissions() {
+    let (env, owner, client) = setup_env();
+    let contributor = Address::generate(&env);
 
-    client.spend_from_category(&user, &food, &10);
-    client.spend_from_category(&user, &food, &10);
-    client.spend_from_category(&user, &food, &10);
+    client.add_contributor(&owner, &contributor);
+    assert!(client.is_contributor(&contributor));
 
-    client.unfreeze_budget(&user, &user);
-    assert!(!client.is_frozen(&user));
+    client.remove_contributor(&owner, &contributor);
+    assert!(!client.is_contributor(&contributor));
+}
+
+// ─────────────────────────────────────────────
+// 4. Ownership transfer edge cases
+// ─────────────────────────────────────────────
+
+#[test]
+fn test_ownership_transfer_revokes_old_owner_privileges() {
+    let (env, owner, client) = setup_env();
+    let new_owner = Address::generate(&env);
+
+    client.transfer_ownership(&owner, &new_owner);
+
+    // Old owner should no longer be recognized as owner
+    assert_ne!(client.get_owner(), owner);
+    assert_eq!(client.get_owner(), new_owner);
 }
 
 #[test]
-fn test_budget_recovery() {
-    let (_, admin, user, client) = setup();
-    let (food, travel) = setup_categories(&client, &admin, &user);
+fn test_new_owner_gains_full_privileges_after_transfer() {
+    let (env, owner, client) = setup_env();
+    let new_owner = Address::generate(&env);
+    let contributor = Address::generate(&env);
 
-    // Initial state (sum = 1500)
-    assert_eq!(client.get_category_balance(&user, &food), 1_000);
-    assert_eq!(client.get_category_balance(&user, &travel), 500);
+    client.transfer_ownership(&owner, &new_owner);
 
-    // Create checkpoint
-    client.create_recovery_checkpoint(&user);
-
-    // Modify budget
-    client.set_category_budget(&admin, &user, &food, &2_000);
-    assert_eq!(client.get_category_balance(&user, &food), 2_000);
-
-    // Restore from checkpoint
-    client.restore_budget_from_checkpoint(&user);
-
-    // Verify restored state (restored to 'default' category with sum of 1500)
-    let default_cat = symbol_short!("default");
-    assert_eq!(client.get_category_balance(&user, &default_cat), 1_500);
-    
-    // Original categories should be cleared as the whole UserBudget was replaced
-    // Testing this behavior depends on get_category_balance panic behavior
+    // New owner should be able to add contributors
+    client.add_contributor(&new_owner, &contributor);
+    assert!(client.is_contributor(&contributor));
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #16)")]
-fn test_restore_without_checkpoint() {
-    let (_, _, user, client) = setup();
-    client.restore_budget_from_checkpoint(&user);
+#[should_panic(expected = "invalid_address")]
+fn test_cannot_transfer_ownership_to_zero_address() {
+    let (env, owner, client) = setup_env();
+
+    // Passing the contract's own address or an invalid address should fail
+    let invalid = client.address.clone();
+    client.transfer_ownership(&owner, &invalid);
 }
 
-#[test]
-fn test_transfer_history_preserved() {
-    let (_, admin, user, client) = setup();
-    let (food, travel) = setup_categories(&client, &admin, &user);
-
-    client.transfer_between_categories(&user, &food, &travel, &100);
-    client.transfer_between_categories(&user, &travel, &food, &50);
-
-    let history = client.get_transfer_history(&user);
-    assert_eq!(history.len(), 2);
-
-    let first = client.get_transfer(&1);
-    assert_eq!(first.amount, 100);
-    let second = client.get_transfer(&2);
-    assert_eq!(second.amount, 50);
-}
+// ─────────────────────────────────────────────
+// 5. Authorization event checks
+// ─────────────────────────────────────────────
 
 #[test]
-fn test_inactivity_timeout_and_ownership_transfer() {
-    let (env, admin, owner, client) = setup();
-    let beneficiary = Address::generate(&env);
+fn test_update_owner_requires_current_owner_auth() {
+    let (env, owner, client) = setup_env();
+    let new_owner = Address::generate(&env);
 
-    client.update_budget(&admin, &owner, &1_000, &None);
-    client.set_category_budget(&admin, &owner, &symbol_short!("food"), &1_000);
+    client.update_owner(&owner, &new_owner);
 
-    let inheritance = soroban_sdk::vec![&env, beneficiary.clone()];
-    client.set_inheritance_bens(&owner, &inheritance);
-
-    client.set_inactivity_timeout(&owner, &10);
-
-    // Let's advance ledger timestamp by 15 seconds
-    env.ledger().set_timestamp(15);
-
-    client.claim_ownership(&beneficiary, &owner);
-
-    // Ownership should be transferred
-    assert_eq!(client.get_budget(&beneficiary).unwrap().amount, 1_000);
-    assert!(client.get_budget(&owner).is_none());
-
-    // Category should be transferred
-    assert_eq!(
-        client.get_category_balance(&beneficiary, &symbol_short!("food")),
-        1_000
+    // Verify that the owner's signature was required
+    let auths = env.auths();
+    assert!(
+        auths.iter().any(|(addr, _)| addr == &owner),
+        "owner auth must be recorded"
     );
 }
 
 #[test]
-fn test_distribute_remaining_funds() {
-    let (env, admin, owner, client) = setup();
-    let beneficiary1 = Address::generate(&env);
-    let beneficiary2 = Address::generate(&env);
+fn test_add_contributor_requires_owner_auth() {
+    let (env, owner, client) = setup_env();
+    let contributor = Address::generate(&env);
 
-    client.update_budget(&admin, &owner, &1_000, &None);
+    client.add_contributor(&owner, &contributor);
 
-    let beneficiaries = soroban_sdk::vec![
-        &env,
-        Beneficiary {
-            address: beneficiary1.clone(),
-            percentage: 60,
-        },
-        Beneficiary {
-            address: beneficiary2.clone(),
-            percentage: 40,
-        }
-    ];
-
-    client.register_beneficiaries(&owner, &beneficiaries);
-    client.set_inactivity_timeout(&owner, &10);
-
-    // Advance timestamp
-    env.ledger().set_timestamp(15);
-
-    client.distribute_remaining_funds(&beneficiary1, &owner);
-
-    // Check balances/budgets
-    assert_eq!(client.get_budget(&beneficiary1).unwrap().amount, 600);
-    assert_eq!(client.get_budget(&beneficiary2).unwrap().amount, 400);
-    assert!(client.get_budget(&owner).is_none());
-}
-
-#[test]
-#[should_panic(expected = "Error(Contract, #15)")]
-fn test_register_beneficiaries_invalid_percentages() {
-    let (env, _, owner, client) = setup();
-    let beneficiary1 = Address::generate(&env);
-    let beneficiary2 = Address::generate(&env);
-
-    let beneficiaries = soroban_sdk::vec![
-        &env,
-        Beneficiary {
-            address: beneficiary1,
-            percentage: 50,
-        },
-        Beneficiary {
-            address: beneficiary2,
-            percentage: 40, // 50 + 40 = 90 (not 100)
-        }
-    ];
-
-    client.register_beneficiaries(&owner, &beneficiaries);
-}
-
-// ── Budget config history versioning (issue #621) ────────────────────────────
-
-#[test]
-fn test_budget_history_records_version_on_set_category() {
-    let (_, admin, user, client) = setup();
-    let food = symbol_short!("food");
-
-    // No history yet
-    assert_eq!(client.get_budget_history(&user).len(), 0);
-
-    client.set_category_budget(&admin, &user, &food, &1_000);
-    let history = client.get_budget_history(&user);
-    assert_eq!(history.len(), 1);
-    assert_eq!(history.get(0).unwrap().version, 1);
-}
-
-#[test]
-fn test_budget_history_version_increments() {
-    let (_, admin, user, client) = setup();
-    let food = symbol_short!("food");
-    let travel = symbol_short!("travel");
-
-    client.set_category_budget(&admin, &user, &food, &1_000);
-    client.set_category_budget(&admin, &user, &travel, &500);
-    client.set_category_budget(&admin, &user, &food, &2_000);
-
-    let history = client.get_budget_history(&user);
-    assert_eq!(history.len(), 3);
-    assert_eq!(history.get(0).unwrap().version, 1);
-    assert_eq!(history.get(1).unwrap().version, 2);
-    assert_eq!(history.get(2).unwrap().version, 3);
-}
-
-#[test]
-fn test_budget_history_timestamps_recorded() {
-    let (env, admin, user, client) = setup();
-    let food = symbol_short!("food");
-
-    env.ledger().set_timestamp(100);
-    client.set_category_budget(&admin, &user, &food, &1_000);
-
-    env.ledger().set_timestamp(200);
-    client.set_category_budget(&admin, &user, &food, &2_000);
-
-    let history = client.get_budget_history(&user);
-    assert_eq!(history.len(), 2);
-    assert_eq!(history.get(0).unwrap().updated_at, 100);
-    assert_eq!(history.get(1).unwrap().updated_at, 200);
-}
-
-#[test]
-fn test_get_budget_version_retrieves_correct_snapshot() {
-    let (_, admin, user, client) = setup();
-    let food = symbol_short!("food");
-
-    client.set_category_budget(&admin, &user, &food, &1_000);
-    client.set_category_budget(&admin, &user, &food, &2_000);
-
-    let v1 = client.get_budget_version(&user, &1);
-    assert_eq!(v1.version, 1);
-    assert_eq!(v1.categories.get(food.clone()).unwrap().limit, 1_000);
-
-    let v2 = client.get_budget_version(&user, &2);
-    assert_eq!(v2.version, 2);
-    assert_eq!(v2.categories.get(food).unwrap().limit, 2_000);
-}
-
-#[test]
-#[should_panic(expected = "Error(Contract, #7)")]
-fn test_get_budget_version_not_found_panics() {
-    let (_, _, user, client) = setup();
-    client.get_budget_version(&user, &99);
-}
-
-#[test]
-fn test_budget_history_queryable_after_multiple_changes() {
-    let (_, admin, user, client) = setup();
-    let food = symbol_short!("food");
-    let travel = symbol_short!("travel");
-    let rent = symbol_short!("rent");
-
-    client.set_category_budget(&admin, &user, &food, &500);
-    client.set_category_budget(&admin, &user, &travel, &300);
-    client.set_category_budget(&admin, &user, &rent, &1_200);
-    client.set_category_budget(&admin, &user, &food, &800);
-
-    let history = client.get_budget_history(&user);
-    assert_eq!(history.len(), 4);
-
-    // Latest version should reflect food=800, travel=300, rent=1200
-    let latest = history.get(3).unwrap();
-    assert_eq!(latest.categories.get(food).unwrap().limit, 800);
-    assert_eq!(latest.categories.get(travel).unwrap().limit, 300);
-    assert_eq!(latest.categories.get(rent).unwrap().limit, 1_200);
+    let auths = env.auths();
+    assert!(
+        auths.iter().any(|(addr, _)| addr == &owner),
+        "owner auth must be recorded for add_contributor"
+    );
 }

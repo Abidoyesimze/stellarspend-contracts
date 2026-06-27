@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, symbol_short, Address, Env, String, Symbol};
+use soroban_sdk::{contracttype, symbol_short, Address, Env, IntoVal, String, Symbol, Val};
 
 use crate::storage::{DEFAULT_FEE_BPS, DEFAULT_MIN_FEE};
 use crate::utils::format_amount;
@@ -14,7 +14,7 @@ pub struct FeeConfigEvents;
 /// Common helper to standardize event publication.
 fn publish<T>(env: &Env, category: Symbol, action: Symbol, data: T)
 where
-    T: IntoVal<Env, soroban_sdk::Val>,
+    T: IntoVal<Env, Val>,
 {
     env.events()
         .publish((category, action, EVENT_VERSION), data);
@@ -47,6 +47,14 @@ pub struct FeeReleasedEvent {
     pub cycle: u64,
     pub amount: i128,
     pub treasury: Address,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeeDistributedEvent {
+    pub total_amount: i128,
+    pub treasury_amount: i128,
+    pub stakeholder_amount: i128,
 }
 
 #[contracttype]
@@ -123,6 +131,23 @@ impl FeeEvents {
                 treasury: treasury.clone(),
             },
         );
+    }
+
+    pub fn fee_bps_updated(env: &Env, fee_bps: u32) {
+        publish(env, symbol_short!("fee"), symbol_short!("bps"), fee_bps);
+    }
+
+    pub fn treasury_updated(env: &Env, treasury: &Address) {
+        publish(
+            env,
+            symbol_short!("fee"),
+            symbol_short!("treasury"),
+            treasury.clone(),
+        );
+    }
+
+    pub fn min_fee_updated(env: &Env, min_fee: i128) {
+        publish(env, symbol_short!("fee"), symbol_short!("minfee"), min_fee);
     }
 
     pub fn fee_rolled(env: &Env, from_cycle: u64, to_cycle: u64, amount: i128) {

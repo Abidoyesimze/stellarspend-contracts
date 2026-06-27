@@ -4,8 +4,9 @@ extern crate std;
 use super::*;
 use soroban_sdk::{
     testutils::{Address as _, Events},
-    Address, Env, Vec,
+    Address, Env, Symbol, TryFromVal, Vec,
 };
+use std::string::String as StdString;
 
 #[test]
 fn test_batch_transfer() {
@@ -48,14 +49,9 @@ fn test_batch_transfer() {
     assert!(batch_ref_id.len() > 0);
 
     // Reference IDs should start with "TXN-"
-    let ref_id_str = std::string::String::from_utf8(
-        batch_ref_id
-            .as_ref()
-            .iter()
-            .map(|b| *b as u8)
-            .collect::<Vec<_>>(),
-    )
-    .unwrap_or_default();
+    let mut ref_id_bytes = std::vec![0u8; batch_ref_id.len() as usize];
+    batch_ref_id.copy_into_slice(&mut ref_id_bytes);
+    let ref_id_str = StdString::from_utf8(ref_id_bytes).unwrap_or_default();
     assert!(ref_id_str.starts_with("TXN-"));
 
     // Verify balances
@@ -64,17 +60,19 @@ fn test_batch_transfer() {
     assert_eq!(token_client.balance(&user2), 200);
     std::println!("Balances OK");
 
-    // Test direct event emission
-    env.events().publish((1,), 2);
-    std::println!("Direct event emitted");
-
-    // Verify events
+    // Verify receipt event was emitted
     let events = env.events().all();
-    std::println!("EVENTS: {:?}", events);
-
-    // We expect at least the direct event + contract events + token events
-    // assert!(events.len() > 0);
-    std::println!("Balances verified. Skipping event assertion due to SDK behavior.");
+    let receipt_topic = soroban_sdk::symbol_short!("receipt");
+    let receipt_found = events.iter().any(|event| {
+        event
+            .1
+            .iter()
+            .any(|topic| Symbol::try_from_val(&env, &topic).ok() == Some(receipt_topic.clone()))
+    });
+    assert!(
+        receipt_found,
+        "Receipt event should be emitted after successful batch payment"
+    );
 }
 
 #[test]
@@ -154,7 +152,7 @@ fn test_batch_transfer_generates_unique_reference_ids() {
     std::println!("Batch 2 Reference ID: {:?}", batch_ref_id_2);
 }
 
-use soroban_sdk::{contract, contractimpl, Address, Env};
+use soroban_sdk::{contract, contractimpl};
 
 use crate::{ContractUtils, DataKey};
 

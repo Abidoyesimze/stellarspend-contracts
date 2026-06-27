@@ -80,12 +80,10 @@ pub fn generate_transaction_reference_id(
     let counter_str = format!("{:016x}", tx_counter);
     let ledger_str = format!("{:08x}", ledger_seq);
 
-    // Combine components to create reference ID
-    // Format: TXN-{ledger}{counter}
-    let ref_id = String::from_str(
-        env,
-        &format!("TXN-{}{}", ledger_str, counter_str[..8].to_string()),
-    );
+    // Combine components to create reference ID.
+    // Use the low 32 bits of the counter so sequential IDs remain unique
+    // while keeping a compact fixed-width format: TXN-{ledger}{counter}.
+    let ref_id = String::from_str(env, &format!("TXN-{}{}", ledger_str, &counter_str[8..]));
 
     ref_id
 }

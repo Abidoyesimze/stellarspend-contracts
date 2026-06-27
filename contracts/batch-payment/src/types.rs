@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address};
+use soroban_sdk::{contracttype, Address, String};
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -7,9 +7,38 @@ pub struct Payment {
     pub amount: i128,
 }
 
-use crate::storage::{bump_instance, DataKey};
-use crate::types::Error;
-use soroban_sdk::{panic_with_error, Address, Env};
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReceiptEvent {
+    pub batch_reference_id: String,
+    pub token: Address,
+    pub from: Address,
+    pub total_payments: u32,
+    pub total_amount: i128,
+}
+
+use soroban_sdk::{panic_with_error, Env};
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum Error {
+    NotInitialized = 1,
+    Unauthorized = 2,
+}
+
+impl From<Error> for soroban_sdk::Error {
+    fn from(err: Error) -> Self {
+        soroban_sdk::Error::from_contract_error(err as u32)
+    }
+}
+
+#[derive(Clone)]
+#[contracttype]
+pub enum DataKey {
+    Admin,
+}
+
+fn bump_instance(_env: &Env) {}
 
 /// Persist the admin address.
 ///
@@ -59,4 +88,12 @@ pub fn require_admin(env: &Env, caller: &Address) {
         panic_with_error!(env, Error::Unauthorized);
     }
     caller.require_auth();
+}
+
+pub struct ContractUtils;
+
+impl ContractUtils {
+    pub fn get_admin(env: &Env) -> Address {
+        get_admin(env)
+    }
 }

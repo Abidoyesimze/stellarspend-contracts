@@ -17,6 +17,7 @@ members = [
     "contracts/budget",
     "contracts/budget-recommendations",
     "contracts/fee",
+    "contracts/stellarspend-fee",
     "contracts/shared-budgets",
     "contracts/multi-currency-wallet",
     "contracts/spending-limits",
@@ -29,16 +30,20 @@ members = [
     "contracts/batch-token-mint",
     "contracts/asset_control",
     "contracts/access-control",
-    "contracts/budget",
     "contracts/category-analytics",
     "contracts/spending-categories",
+    "contracts/user",
     "contracts/users",
+    "contracts/activity-feed",
+    "contracts/transactional",
     "contracts/transactions",
     "contracts/transaction-validation",
     "contracts/merchant-tagging",
     "contracts/currency-conversion",
     "contracts/benchmarks",
     "contracts/zk-verifier",
+    "contracts/pausable",
+    "contracts/allowances",
 ]
 
 [package]
@@ -70,6 +75,18 @@ path = "tests/rate_limit_tests.rs"
 [[test]]
 name = "concurrent_spending_tests"
 path = "contracts/tests/concurrent_spending_tests.rs"
+
+[[test]]
+name = "governance_tests"
+path = "tests/governance_tests.rs"
+
+[[test]]
+name = "throttling_test"
+path = "contracts/tests/throttling_test.rs"
+
+[[test]]
+name = "timelock_tests"
+path = "tests/timelock_tests.rs"
 
 [workspace.package]
 version = "0.1.0"

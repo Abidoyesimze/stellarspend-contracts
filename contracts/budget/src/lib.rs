@@ -21,19 +21,20 @@ use soroban_sdk::{
 };
 
 pub use storage::{
-    BudgetCheckpoint, BudgetConfigVersion, BudgetFreeze, BudgetTemplate, CategoryBudget,
-    CategoryTransfer, DataKey, SpendingWindow, UserBudget, DEFAULT_FREEZE_DURATION_SECONDS,
-    RAPID_SPEND_THRESHOLD, RAPID_SPEND_WINDOW_SECONDS,
+    BudgetCheckpoint, BudgetConfigVersion, BudgetFreeze, BudgetSuspension, BudgetTemplate,
+    CategoryBudget, CategoryTransfer, DataKey, SpendingWindow, UserBudget,
+    DEFAULT_FREEZE_DURATION_SECONDS, RAPID_SPEND_THRESHOLD, RAPID_SPEND_WINDOW_SECONDS,
 };
 
 pub use types::Beneficiary;
 
 use storage::{
-    clear_budget_freeze, delete_template, get_budget_config_history, get_budget_config_version,
-    get_budget_freeze, get_category_available, get_template, get_transfer,
-    get_user_budget as load_user_budget, get_user_templates, get_user_transfers,
-    increment_suspicious_count, is_budget_frozen, next_transfer_id, record_spend_timestamp,
-    record_transfer, save_budget_config_version, save_template, set_budget_freeze, set_user_budget,
+    clear_budget_freeze, clear_budget_suspension, delete_template, get_budget_config_history,
+    get_budget_config_version, get_budget_freeze, get_budget_suspension, get_category_available,
+    get_template, get_transfer, get_user_budget as load_user_budget, get_user_templates,
+    get_user_transfers, increment_suspicious_count, is_budget_frozen, next_transfer_id,
+    record_spend_timestamp, record_transfer, save_budget_config_version, save_template,
+    set_budget_freeze, set_budget_suspension, set_user_budget, try_auto_resume_budget,
 };
 
 /// Deletion cooldown period in seconds (24 hours).
@@ -47,12 +48,6 @@ pub enum BudgetError {
     Unauthorized = 2,
     InvalidAmount = 3,
     UserNotFound = 4,
-    /// Caller is not a delegated manager for this owner
-    NotDelegated = 5,
-    /// Requested amount exceeds the manager's granted permission limit
-    ExceedsPermission = 6,
-    /// Delegation exists but has been revoked (inactive)
-    DelegationNotActive = 7,
     DeletionCooldownNotElapsed = 5,
     NoPendingDeletion = 6,
     BudgetNotFound = 7,
@@ -66,6 +61,16 @@ pub enum BudgetError {
     InvalidPercentages = 15,
     CheckpointNotFound = 16,
     IntegrityCheckFailed = 17,
+    BudgetExpired = 18,
+    BudgetInactive = 19,
+    /// Caller is not a delegated manager for this owner
+    NotDelegated = 20,
+    /// Requested amount exceeds the manager's granted permission limit
+    ExceedsPermission = 21,
+    /// Delegation exists but has been revoked (inactive)
+    DelegationNotActive = 22,
+    /// Budget violates a configured rule
+    RuleViolation = 23,
 }
 
 impl From<BudgetError> for soroban_sdk::Error {
@@ -83,6 +88,8 @@ pub struct BudgetRecord {
     pub amount: i128,
     pub asset: Option<Address>,
     pub last_updated: u64,
+    pub expires_at: Option<u64>,
+    pub is_active: bool,
 }
 
 /// Permission record for a delegated budget manager.
@@ -250,25 +257,6 @@ impl BudgetContract {
             .set(&DataKey::TotalAllocated, &0i128);
     }
 
-    /// Updates a single user's budget. Admin only.
-    ///
-    /// # Arguments
-    /// * `env` - The contract environment
-    /// * `admin` - The admin address calling the function
-    /// * `user` - The user address to update budget for
-    /// * `amount` - The new budget amount (must be > 0)
-    pub fn update_budget(env: Env, admin: Address, user: Address, amount: i128) {
-        env.storage()
-            .instance()
-            .set(&DataKey::TransferCounter, &0u64);
-        env.storage()
-            .instance()
-            .set(&DataKey::SuspiciousActivityCount, &0u64);
-        env.storage()
-            .instance()
-            .set(&DataKey::TotalAllocated, &0i128);
-    }
-
     /// Updates a single user's budget with optional multi-asset support.
     pub fn update_budget(
         env: Env,
@@ -284,6 +272,33 @@ impl BudgetContract {
             panic_with_error!(&env, BudgetError::InvalidAmount);
         }
 
+        let global_rules: Vec<crate::types::BudgetRule> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::GlobalRules)
+            .unwrap_or(Vec::new(&env));
+
+        let user_rules: Vec<crate::types::BudgetRule> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::UserRules(user.clone()))
+            .unwrap_or(Vec::new(&env));
+
+        for rule in global_rules.iter().chain(user_rules.iter()) {
+            match rule {
+                crate::types::BudgetRule::MaxAmount(max) => {
+                    if amount > max {
+                        panic_with_error!(&env, BudgetError::RuleViolation);
+                    }
+                }
+                crate::types::BudgetRule::MinAmount(min) => {
+                    if amount < min {
+                        panic_with_error!(&env, BudgetError::RuleViolation);
+                    }
+                }
+            }
+        }
+
         let current_time = env.ledger().timestamp();
 
         let mut total_allocated: i128 = env
@@ -292,12 +307,17 @@ impl BudgetContract {
             .get(&DataKey::TotalAllocated)
             .unwrap_or(0);
 
+        let mut expires_at = None;
+        let mut is_active = true;
+
         if let Some(old_record) = env
             .storage()
             .persistent()
             .get::<DataKey, BudgetRecord>(&DataKey::Budget(user.clone()))
         {
             total_allocated = total_allocated.checked_sub(old_record.amount).unwrap_or(0);
+            expires_at = old_record.expires_at;
+            is_active = old_record.is_active;
         }
 
         total_allocated = total_allocated.checked_add(amount).unwrap_or(i128::MAX);
@@ -307,6 +327,8 @@ impl BudgetContract {
             amount,
             asset: asset.clone(),
             last_updated: current_time,
+            expires_at,
+            is_active,
         };
 
         env.storage()
@@ -368,6 +390,33 @@ impl BudgetContract {
             panic_with_error!(&env, BudgetError::InvalidAmount);
         }
 
+        let global_rules: Vec<crate::types::BudgetRule> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::GlobalRules)
+            .unwrap_or(Vec::new(&env));
+
+        let user_rules: Vec<crate::types::BudgetRule> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::UserRules(user.clone()))
+            .unwrap_or(Vec::new(&env));
+
+        for rule in global_rules.iter().chain(user_rules.iter()) {
+            match rule {
+                crate::types::BudgetRule::MaxAmount(max) => {
+                    if limit > max {
+                        panic_with_error!(&env, BudgetError::RuleViolation);
+                    }
+                }
+                crate::types::BudgetRule::MinAmount(min) => {
+                    if limit < min {
+                        panic_with_error!(&env, BudgetError::RuleViolation);
+                    }
+                }
+            }
+        }
+
         let now = env.ledger().timestamp();
         let mut budget = load_user_budget(&env, &user).unwrap_or(UserBudget {
             user: user.clone(),
@@ -397,6 +446,142 @@ impl BudgetContract {
 
         BudgetEvents::category_budget_set(&env, &user, &category, limit);
     }
+
+    fn assert_active_and_not_expired(env: &Env, user: &Address) {
+        let now = env.ledger().timestamp();
+        try_auto_resume_budget(env, user, now);
+        if storage::is_budget_suspended(env, user, now) {
+            panic_with_error!(env, BudgetError::BudgetInactive);
+        }
+
+        if let Some(mut record) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, BudgetRecord>(&DataKey::Budget(user.clone()))
+        {
+            if !record.is_active {
+                panic_with_error!(env, BudgetError::BudgetInactive);
+            }
+            if let Some(expires_at) = record.expires_at {
+                if now >= expires_at {
+                    record.is_active = false;
+                    env.storage()
+                        .persistent()
+                        .set(&DataKey::Budget(user.clone()), &record);
+                    panic_with_error!(env, BudgetError::BudgetExpired);
+                }
+            }
+        }
+    }
+
+    pub fn configure_expiration(env: Env, admin: Address, user: Address, expires_at: u64) {
+        admin.require_auth();
+        Self::require_admin(&env, &admin);
+
+        let mut record = env
+            .storage()
+            .persistent()
+            .get::<DataKey, BudgetRecord>(&DataKey::Budget(user.clone()))
+            .unwrap_or_else(|| panic_with_error!(&env, BudgetError::UserNotFound));
+
+        record.expires_at = Some(expires_at);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Budget(user.clone()), &record);
+    }
+
+    pub fn mark_inactive(env: Env, admin: Address, user: Address) {
+        admin.require_auth();
+        Self::require_admin(&env, &admin);
+
+        let mut record = env
+            .storage()
+            .persistent()
+            .get::<DataKey, BudgetRecord>(&DataKey::Budget(user.clone()))
+            .unwrap_or_else(|| panic_with_error!(&env, BudgetError::UserNotFound));
+
+        record.is_active = false;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Budget(user.clone()), &record);
+    }
+
+    /// Suspends a user's budget. When `duration_seconds` is zero the suspension is indefinite
+    /// until `resume_budget` is called; otherwise the budget automatically resumes afterward.
+    pub fn suspend_budget(env: Env, admin: Address, user: Address, duration_seconds: u64) {
+        admin.require_auth();
+        Self::require_admin(&env, &admin);
+
+        let mut record = env
+            .storage()
+            .persistent()
+            .get::<DataKey, BudgetRecord>(&DataKey::Budget(user.clone()))
+            .unwrap_or_else(|| panic_with_error!(&env, BudgetError::UserNotFound));
+
+        let now = env.ledger().timestamp();
+        let resume_at = if duration_seconds > 0 {
+            now.saturating_add(duration_seconds)
+        } else {
+            0
+        };
+
+        set_budget_suspension(
+            &env,
+            &user,
+            &BudgetSuspension {
+                is_suspended: true,
+                suspended_at: now,
+                resume_at,
+            },
+        );
+
+        record.is_active = false;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Budget(user.clone()), &record);
+    }
+
+    /// Manually resumes a suspended budget before its optional expiration.
+    pub fn resume_budget(env: Env, admin: Address, user: Address) {
+        admin.require_auth();
+        Self::require_admin(&env, &admin);
+
+        clear_budget_suspension(&env, &user);
+
+        if let Some(mut record) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, BudgetRecord>(&DataKey::Budget(user.clone()))
+        {
+            record.is_active = true;
+            env.storage()
+                .persistent()
+                .set(&DataKey::Budget(user.clone()), &record);
+        }
+    }
+
+    /// Returns whether the user's budget is currently suspended.
+    pub fn is_budget_suspended(env: Env, user: Address) -> bool {
+        storage::is_budget_suspended(&env, &user, env.ledger().timestamp())
+    }
+
+    pub fn deactivate_if_expired(env: Env, user: Address) {
+        if let Some(mut record) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, BudgetRecord>(&DataKey::Budget(user.clone()))
+        {
+            if let Some(expires_at) = record.expires_at {
+                if env.ledger().timestamp() >= expires_at {
+                    record.is_active = false;
+                    env.storage()
+                        .persistent()
+                        .set(&DataKey::Budget(user.clone()), &record);
+                }
+            }
+        }
+    }
+
     pub fn transfer_between_categories(
         env: Env,
         user: Address,
@@ -406,6 +591,7 @@ impl BudgetContract {
     ) -> u64 {
         user.require_auth();
         Self::assert_not_frozen(&env, &user);
+        Self::assert_active_and_not_expired(&env, &user);
 
         if amount <= 0 {
             panic_with_error!(&env, BudgetError::InvalidAmount);
@@ -479,6 +665,7 @@ impl BudgetContract {
     pub fn spend_from_category(env: Env, user: Address, category: Symbol, amount: i128) -> i128 {
         user.require_auth();
         Self::assert_not_frozen(&env, &user);
+        Self::assert_active_and_not_expired(&env, &user);
 
         if amount <= 0 {
             panic_with_error!(&env, BudgetError::InvalidAmount);
@@ -731,6 +918,44 @@ impl BudgetContract {
             .get(&DataKey::PendingDeletion(user))
     }
 
+    /// Adds a global budget rule.
+    pub fn add_global_rule(env: Env, admin: Address, rule: crate::types::BudgetRule) {
+        admin.require_auth();
+        Self::require_admin(&env, &admin);
+
+        let mut rules: Vec<crate::types::BudgetRule> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::GlobalRules)
+            .unwrap_or(Vec::new(&env));
+
+        if !rules.contains(&rule) {
+            rules.push_back(rule);
+            env.storage()
+                .persistent()
+                .set(&DataKey::GlobalRules, &rules);
+        }
+    }
+
+    /// Adds a user-specific budget rule.
+    pub fn add_user_rule(env: Env, admin: Address, user: Address, rule: crate::types::BudgetRule) {
+        admin.require_auth();
+        Self::require_admin(&env, &admin);
+
+        let mut rules: Vec<crate::types::BudgetRule> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::UserRules(user.clone()))
+            .unwrap_or(Vec::new(&env));
+
+        if !rules.contains(&rule) {
+            rules.push_back(rule);
+            env.storage()
+                .persistent()
+                .set(&DataKey::UserRules(user), &rules);
+        }
+    }
+
     /// Retrieves the budget for a specific user (default/native asset).
     pub fn get_budget(env: Env, user: Address) -> Option<BudgetRecord> {
         env.storage().persistent().get(&DataKey::Budget(user))
@@ -907,12 +1132,18 @@ impl BudgetContract {
             .get(&DataKey::TotalAllocated)
             .unwrap_or(0);
 
+        let mut expires_at = None;
+        let mut is_active = true;
+        let mut asset = None;
         if let Some(old_record) = env
             .storage()
             .persistent()
             .get::<DataKey, BudgetRecord>(&DataKey::Budget(owner.clone()))
         {
             total_allocated = total_allocated.checked_sub(old_record.amount).unwrap_or(0);
+            expires_at = old_record.expires_at;
+            is_active = old_record.is_active;
+            asset = old_record.asset;
         }
 
         total_allocated = total_allocated.checked_add(amount).unwrap_or(i128::MAX);
@@ -920,7 +1151,10 @@ impl BudgetContract {
         let record = BudgetRecord {
             user: owner.clone(),
             amount,
+            asset,
             last_updated: current_time,
+            expires_at,
+            is_active,
         };
 
         env.storage()
@@ -1098,6 +1332,8 @@ impl BudgetContract {
                                 amount: share,
                                 asset: None,
                                 last_updated: now,
+                                expires_at: None,
+                                is_active: true,
                             },
                         );
                     }
@@ -1149,6 +1385,8 @@ impl BudgetContract {
                                     amount: share,
                                     asset: Some(asset.clone()),
                                     last_updated: now,
+                                    expires_at: None,
+                                    is_active: true,
                                 },
                             );
                         }
@@ -1318,7 +1556,7 @@ mod test {
         let (env, admin, client) = setup_test_contract();
         let user = Address::generate(&env);
 
-        client.update_budget(&admin, &user, &1_000_i128);
+        client.update_budget(&admin, &user, &1_000_i128, &None);
 
         let record = client.get_budget(&user).unwrap();
         assert_eq!(record.amount, 1_000);
@@ -1331,8 +1569,8 @@ mod test {
         let user1 = Address::generate(&env);
         let user2 = Address::generate(&env);
 
-        client.update_budget(&admin, &user1, &500_i128);
-        client.update_budget(&admin, &user2, &300_i128);
+        client.update_budget(&admin, &user1, &500_i128, &None);
+        client.update_budget(&admin, &user2, &300_i128, &None);
 
         assert_eq!(client.get_total_allocated(), 800);
     }
@@ -1446,7 +1684,7 @@ mod test {
         client.delegate_manager(&owner, &manager, &100_i128);
 
         // Admin (ultimate control) can still set any amount, including above manager's limit
-        client.update_budget(&admin, &owner, &999_999_i128);
+        client.update_budget(&admin, &owner, &999_999_i128, &None);
 
         let record = client.get_budget(&owner).unwrap();
         assert_eq!(record.amount, 999_999);
@@ -1473,6 +1711,62 @@ mod test {
         let manager = Address::generate(&env);
 
         client.delegate_manager(&owner, &manager, &0_i128);
+    }
+
+    #[test]
+    fn test_suspended_budget_blocks_operations_until_expiration() {
+        use soroban_sdk::testutils::Ledger as _;
+
+        let (env, admin, client) = setup_test_contract();
+        let user = Address::generate(&env);
+        let food = symbol_short!("food");
+
+        client.update_budget(&admin, &user, &1_000_i128, &None);
+        client.set_category_budget(&admin, &user, &food, &500_i128);
+
+        client.suspend_budget(&admin, &user, &3600);
+        assert!(client.is_budget_suspended(&user));
+
+        env.ledger().with_mut(|li| {
+            li.timestamp += 1800;
+        });
+        assert!(client.is_budget_suspended(&user));
+
+        env.ledger().with_mut(|li| {
+            li.timestamp += 3601;
+        });
+        assert!(!client.is_budget_suspended(&user));
+
+        let record = client.get_budget(&user).unwrap();
+        assert!(record.is_active);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #19)")]
+    fn test_suspended_budget_blocks_category_spend() {
+        let (env, admin, client) = setup_test_contract();
+        let user = Address::generate(&env);
+        let food = symbol_short!("food");
+
+        client.update_budget(&admin, &user, &1_000_i128, &None);
+        client.set_category_budget(&admin, &user, &food, &500_i128);
+        client.suspend_budget(&admin, &user, &0);
+
+        client.spend_from_category(&user, &food, &10_i128);
+    }
+
+    #[test]
+    fn test_manual_resume_budget() {
+        let (env, admin, client) = setup_test_contract();
+        let user = Address::generate(&env);
+
+        client.update_budget(&admin, &user, &500_i128, &None);
+        client.suspend_budget(&admin, &user, &0);
+        assert!(client.is_budget_suspended(&user));
+
+        client.resume_budget(&admin, &user);
+        assert!(!client.is_budget_suspended(&user));
+        assert!(client.get_budget(&user).unwrap().is_active);
     }
 }
 
