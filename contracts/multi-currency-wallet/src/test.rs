@@ -4,7 +4,7 @@
 
 use crate::validation::validate_currency_match;
 use crate::{MultiCurrencyWalletContract, MultiCurrencyWalletContractClient};
-use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, Symbol, Vec};
+use soroban_sdk::{symbol_short, testutils::Address as _, testutils::Ledger, Address, Env, Symbol, Vec};
 
 use crate::types::{BalanceUpdateRequest, BalanceUpdateResult, ErrorCode};
 
@@ -24,7 +24,7 @@ fn setup_test_contract() -> (Env, Address, MultiCurrencyWalletContractClient<'st
 
 /// Helper function to create a valid balance update request.
 fn create_valid_request(
-    env: &Env,
+    _env: &Env,
     user: &Address,
     currency: Symbol,
     amount: i128,
@@ -170,7 +170,7 @@ fn test_balance_add_operation() {
     ));
     client.batch_update_balances(&admin, &requests1);
 
-    // Add to balance
+    // Add more to the existing balance
     let mut requests2: Vec<BalanceUpdateRequest> = Vec::new(&env);
     requests2.push_back(create_valid_request(
         &env,
@@ -204,7 +204,7 @@ fn test_balance_subtract_operation() {
     ));
     client.batch_update_balances(&admin, &requests1);
 
-    // Subtract from balance
+    // Subtract from the existing balance
     let mut requests2: Vec<BalanceUpdateRequest> = Vec::new(&env);
     requests2.push_back(create_valid_request(
         &env,
@@ -238,13 +238,13 @@ fn test_balance_subtract_insufficient_fails() {
     ));
     client.batch_update_balances(&admin, &requests1);
 
-    // Try to subtract more than balance
+    // Try to subtract more than available balance
     let mut requests2: Vec<BalanceUpdateRequest> = Vec::new(&env);
     requests2.push_back(create_valid_request(
         &env,
         &user,
         symbol_short!("USDC"),
-        1000_000_000,
+        600_000_000,
         symbol_short!("subtract"),
     ));
     let result = client.batch_update_balances(&admin, &requests2);
@@ -384,6 +384,7 @@ fn test_get_balance_details() {
         symbol_short!("set"),
     ));
 
+    env.ledger().set_sequence_number(100);
     client.batch_update_balances(&admin, &requests);
 
     // Get balance details

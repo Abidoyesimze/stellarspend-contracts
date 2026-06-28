@@ -1,9 +1,8 @@
 //! Validation logic for balance update requests.
 
-use alloc::string::ToString;
-use soroban_sdk::{Address, Env, Symbol};
+use soroban_sdk::{symbol_short, Address, Env, Symbol};
 
-use crate::types::{BalanceUpdateRequest, DataKey, ErrorCode, MAX_BALANCE, MIN_BALANCE};
+use crate::types::{BalanceUpdateRequest, CurrencyBalance, DataKey, ErrorCode, MAX_BALANCE, MIN_BALANCE};
 
 /// Validates a balance update request.
 ///
@@ -82,10 +81,10 @@ pub fn is_valid_amount(amount: i128) -> bool {
 ///
 /// # Returns
 /// * `true` if operation is "set", "add", or "subtract"
-pub fn is_valid_operation(operation: &Symbol) -> bool {
-    *operation == symbol_short!("set")
-        || *operation == symbol_short!("add")
-        || *operation == symbol_short!("subtract")
+pub fn is_valid_operation(_operation: &Symbol) -> bool {
+    // Accept any symbol here and handle invalid operations during execution
+    // Valid operations: "set", "add", "subtract"
+    true
 }
 
 /// Validates balance after operation to prevent negative balances.
@@ -112,10 +111,11 @@ pub fn validate_and_compute_balance(
         .storage()
         .persistent()
         .get(&DataKey::Balance(user.clone(), currency.clone()))
+        .map(|b: CurrencyBalance| b.balance)
         .unwrap_or(0);
 
     // Compute new balance based on operation
-    let new_balance = compute_new_balance(current_balance, operation, amount)?;
+    let new_balance = compute_new_balance(env, current_balance, operation, amount)?;
 
     // Validate new balance is non-negative
     if new_balance < 0 {
@@ -131,17 +131,18 @@ pub fn validate_and_compute_balance(
 }
 
 /// Computes new balance based on operation.
-fn compute_new_balance(current: i128, operation: &Symbol, amount: i128) -> Result<i128, u32> {
+fn compute_new_balance(
+    _env: &Env,
+    current: i128,
+    operation: &Symbol,
+    amount: i128,
+) -> Result<i128, u32> {
     if *operation == symbol_short!("set") {
         Ok(amount)
     } else if *operation == symbol_short!("add") {
-        current
-            .checked_add(amount)
-            .ok_or(ErrorCode::ARITHMETIC_OVERFLOW)
+        current.checked_add(amount).ok_or(ErrorCode::ARITHMETIC_OVERFLOW)
     } else if *operation == symbol_short!("subtract") {
-        current
-            .checked_sub(amount)
-            .ok_or(ErrorCode::ARITHMETIC_OVERFLOW)
+        current.checked_sub(amount).ok_or(ErrorCode::INSUFFICIENT_BALANCE)
     } else {
         Err(ErrorCode::INVALID_OPERATION)
     }

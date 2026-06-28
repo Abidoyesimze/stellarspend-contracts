@@ -100,6 +100,7 @@ pub enum DataKey {
 }
 
 /// Error codes for balance update validation.
+#[allow(non_snake_case)]
 pub mod ErrorCode {
     /// Invalid balance amount (negative or exceeds max)
     pub const INVALID_AMOUNT: u32 = 0;
