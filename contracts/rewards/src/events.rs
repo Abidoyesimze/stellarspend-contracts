@@ -13,12 +13,16 @@ pub fn emit_account_initialized(env: &Env, participant: &Address) {
 
 /// Emitted when `amount` reward points are credited to `participant`'s account.
 pub fn emit_reward_credited(env: &Env, participant: &Address, amount: i128, tx_id: u64) {
-    env.events()
-        .publish(("rewards", "reward_credited"), (participant.clone(), amount, tx_id));
+    env.events().publish(
+        ("rewards", "reward_credited"),
+        (participant.clone(), amount, tx_id),
+    );
 }
 
 /// Emitted when `amount` reward points are debited from `participant`'s account.
 pub fn emit_reward_debited(env: &Env, participant: &Address, amount: i128, tx_id: u64) {
-    env.events()
-        .publish(("rewards", "reward_debited"), (participant.clone(), amount, tx_id));
+    env.events().publish(
+        ("rewards", "reward_debited"),
+        (participant.clone(), amount, tx_id),
+    );
 }
