@@ -8,10 +8,9 @@ use soroban_sdk::{Address, Env};
 
 use crate::events::{emit_account_initialized, emit_reward_credited, emit_reward_debited};
 use crate::storage::{
-    get_lifetime_claimed, get_lifetime_earned, get_reward_account, get_reward_balance,
-    append_reward_index, get_lifetime_earned, get_reward_account, get_reward_balance,
-    get_reward_tx_counter, set_lifetime_claimed, set_lifetime_earned, set_reward_account,
-    set_reward_balance, set_reward_transaction, set_reward_tx_counter,
+    append_reward_index, get_lifetime_claimed, get_lifetime_earned, get_reward_account,
+    get_reward_balance, get_reward_tx_counter, set_lifetime_claimed, set_lifetime_earned,
+    set_reward_account, set_reward_balance, set_reward_transaction, set_reward_tx_counter,
 };
 use crate::types::{RewardAccount, RewardStatus, RewardTransaction, RewardType};
 use crate::validation::{
