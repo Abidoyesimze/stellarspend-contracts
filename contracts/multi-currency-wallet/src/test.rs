@@ -4,7 +4,9 @@
 
 use crate::validation::validate_currency_match;
 use crate::{MultiCurrencyWalletContract, MultiCurrencyWalletContractClient};
-use soroban_sdk::{symbol_short, testutils::Address as _, testutils::Ledger, Address, Env, Symbol, Vec};
+use soroban_sdk::{
+    symbol_short, testutils::Address as _, testutils::Ledger, Address, Env, Symbol, Vec,
+};
 
 use crate::types::{BalanceUpdateRequest, BalanceUpdateResult, ErrorCode};
 

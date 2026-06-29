@@ -2,7 +2,9 @@
 
 use soroban_sdk::{symbol_short, Address, Env, Symbol};
 
-use crate::types::{BalanceUpdateRequest, CurrencyBalance, DataKey, ErrorCode, MAX_BALANCE, MIN_BALANCE};
+use crate::types::{
+    BalanceUpdateRequest, CurrencyBalance, DataKey, ErrorCode, MAX_BALANCE, MIN_BALANCE,
+};
 
 /// Validates a balance update request.
 ///
@@ -140,9 +142,13 @@ fn compute_new_balance(
     if *operation == symbol_short!("set") {
         Ok(amount)
     } else if *operation == symbol_short!("add") {
-        current.checked_add(amount).ok_or(ErrorCode::ARITHMETIC_OVERFLOW)
+        current
+            .checked_add(amount)
+            .ok_or(ErrorCode::ARITHMETIC_OVERFLOW)
     } else if *operation == symbol_short!("subtract") {
-        current.checked_sub(amount).ok_or(ErrorCode::INSUFFICIENT_BALANCE)
+        current
+            .checked_sub(amount)
+            .ok_or(ErrorCode::INSUFFICIENT_BALANCE)
     } else {
         Err(ErrorCode::INVALID_OPERATION)
     }

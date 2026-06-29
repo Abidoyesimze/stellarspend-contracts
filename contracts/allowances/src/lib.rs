@@ -29,7 +29,7 @@ use soroban_sdk::{
     contract, contractimpl, panic_with_error, symbol_short, token, Address, Env, Vec,
 };
 
-use types::{AllowanceError, Allowance, DataKey, Frequency};
+use types::{Allowance, AllowanceError, DataKey, Frequency};
 
 /// Allowance contract.
 #[contract]
