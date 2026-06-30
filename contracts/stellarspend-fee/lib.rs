@@ -86,4 +86,4 @@ pub fn set_user_profile(env: Env, user: Address, data: String) {
 
 pub fn get_user_profile(env: Env, user: Address) -> String {
     storage::get_user_profile(&env, user)
-}
+}.
