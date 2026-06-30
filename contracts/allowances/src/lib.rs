@@ -13,7 +13,19 @@
 //! - #835 Add Allowance Beneficiary Update — `update_beneficiary`
 //! - #841/#842 Implement Allowance Renewal — `renew_allowance` (reactivate + reset schedule)
 //! - #844 Implement Allowance Balance Queries — `get_allowance_balance`
-
+//! Manages recurring spending allowances on Stellar/Soroban.
+//!
+//! ## Issues resolved
+//! - #822 Create Allowance Contract — storage schema + contract scaffold
+//! - #823 Add Allowance Creation    — `create_allowance` with event emission
+//! - #824 Implement Weekly Allowances  — `Frequency::Weekly` (7-day interval)
+//! - #825 Implement Monthly Allowances — `Frequency::Monthly` (30-day interval)
+//! - #832 Add Daily Allowances         — `Frequency::Daily` (24-hour interval)
+//! - #833 Add Allowance Pause/Resume   — `pause_allowance` / `resume_allowance`
+//! - #834 Add Allowance Cancellation   — `cancel_allowance` (already present, confirmed)
+//! - #835 Add Allowance Beneficiary Update — `update_beneficiary`
+//! - #841/#842 Implement Allowance Renewal — `renew_allowance` (reactivate + reset schedule)
+//! - #844 Implement Allowance Balance Queries — `get_allowance_balance
 #![no_std]
 
 mod types;
