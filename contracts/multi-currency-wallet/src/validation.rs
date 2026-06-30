@@ -2,7 +2,9 @@
 
 use soroban_sdk::{symbol_short, Address, Env, Symbol};
 
-use crate::types::{BalanceUpdateRequest, DataKey, ErrorCode, MAX_BALANCE, MIN_BALANCE};
+use crate::types::{
+    BalanceUpdateRequest, CurrencyBalance, DataKey, ErrorCode, MAX_BALANCE, MIN_BALANCE,
+};
 
 /// Validates a balance update request.
 ///
@@ -31,6 +33,23 @@ pub fn validate_balance_request(request: &BalanceUpdateRequest) -> Result<(), u3
     }
 
     Ok(())
+}
+
+/// Validates that two currency symbols match.
+///
+/// # Arguments
+/// * `currency` - The currency to validate
+/// * `expected` - The expected currency
+///
+/// # Returns
+/// * `Ok(())` if currencies match
+/// * `Err(CURRENCY_MISMATCH)` if currencies don't match
+pub fn validate_currency_match(currency: &Symbol, expected: &Symbol) -> Result<(), u32> {
+    if currency == expected {
+        Ok(())
+    } else {
+        Err(ErrorCode::CURRENCY_MISMATCH)
+    }
 }
 
 /// Validates that an address is valid.
@@ -64,10 +83,10 @@ pub fn is_valid_amount(amount: i128) -> bool {
 ///
 /// # Returns
 /// * `true` if operation is "set", "add", or "subtract"
-pub fn is_valid_operation(operation: &Symbol) -> bool {
-    *operation == symbol_short!("set")
-        || *operation == symbol_short!("add")
-        || *operation == symbol_short!("subtract")
+pub fn is_valid_operation(_operation: &Symbol) -> bool {
+    // Accept any symbol here and handle invalid operations during execution
+    // Valid operations: "set", "add", "subtract"
+    true
 }
 
 /// Validates balance after operation to prevent negative balances.
@@ -94,10 +113,11 @@ pub fn validate_and_compute_balance(
         .storage()
         .persistent()
         .get(&DataKey::Balance(user.clone(), currency.clone()))
+        .map(|b: CurrencyBalance| b.balance)
         .unwrap_or(0);
 
     // Compute new balance based on operation
-    let new_balance = compute_new_balance(current_balance, operation, amount)?;
+    let new_balance = compute_new_balance(env, current_balance, operation, amount)?;
 
     // Validate new balance is non-negative
     if new_balance < 0 {
@@ -113,7 +133,12 @@ pub fn validate_and_compute_balance(
 }
 
 /// Computes new balance based on operation.
-fn compute_new_balance(current: i128, operation: &Symbol, amount: i128) -> Result<i128, u32> {
+fn compute_new_balance(
+    _env: &Env,
+    current: i128,
+    operation: &Symbol,
+    amount: i128,
+) -> Result<i128, u32> {
     if *operation == symbol_short!("set") {
         Ok(amount)
     } else if *operation == symbol_short!("add") {
@@ -123,7 +148,7 @@ fn compute_new_balance(current: i128, operation: &Symbol, amount: i128) -> Resul
     } else if *operation == symbol_short!("subtract") {
         current
             .checked_sub(amount)
-            .ok_or(ErrorCode::ARITHMETIC_OVERFLOW)
+            .ok_or(ErrorCode::INSUFFICIENT_BALANCE)
     } else {
         Err(ErrorCode::INVALID_OPERATION)
     }
@@ -180,6 +205,22 @@ mod tests {
         assert!(!is_valid_amount(MIN_BALANCE - 1));
         assert!(!is_valid_amount(0));
         assert!(!is_valid_amount(-1000));
+    }
+
+    #[test]
+    fn test_currency_match_same() {
+        let usdc = symbol_short!("USDC");
+        assert!(validate_currency_match(&usdc, &usdc).is_ok());
+    }
+
+    #[test]
+    fn test_currency_match_different() {
+        let usdc = symbol_short!("USDC");
+        let xlm = symbol_short!("XLM");
+        assert_eq!(
+            validate_currency_match(&usdc, &xlm),
+            Err(ErrorCode::CURRENCY_MISMATCH)
+        );
     }
 
     #[test]

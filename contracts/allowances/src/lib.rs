@@ -37,41 +37,7 @@ use soroban_sdk::{
     contract, contractimpl, panic_with_error, symbol_short, token, Address, Env, Vec,
 };
 
-use types::{Allowance, AllowanceAnalytics, AllowanceError, DataKey, Frequency};
-use types::{Allowance, AllowanceError, DataKey, Frequency, PaymentRecord};
-
-// ── Internal storage helpers (#847) ───────────────────────────────────────────
-//
-// Centralize allowance reads/writes so every operation performs exactly one
-// load and one store, and the persistent-storage accessor + key are built once
-// per access rather than being duplicated across call sites. Previously each
-// mutator re-derived the `env.storage().persistent()` accessor for both its
-// read and its write (and index updates did so twice); these helpers collapse
-// that to a single accessor per logical operation.
-
-/// Loads an allowance by id, panicking with `NotFound` if it does not exist.
-fn load_allowance(env: &Env, allowance_id: u64) -> Allowance {
-    env.storage()
-        .persistent()
-        .get(&DataKey::Allowance(allowance_id))
-        .unwrap_or_else(|| panic_with_error!(env, AllowanceError::NotFound))
-}
-
-/// Persists an allowance record.
-fn save_allowance(env: &Env, allowance_id: u64, allowance: &Allowance) {
-    env.storage()
-        .persistent()
-        .set(&DataKey::Allowance(allowance_id), allowance);
-}
-
-/// Appends an id to an index vector (`OwnerAllowances` / `RecipientAllowances`)
-/// using a single storage accessor for the read-modify-write.
-fn append_index(env: &Env, key: DataKey, allowance_id: u64) {
-    let store = env.storage().persistent();
-    let mut ids: Vec<u64> = store.get(&key).unwrap_or(Vec::new(env));
-    ids.push_back(allowance_id);
-    store.set(&key, &ids);
-}
+use types::{Allowance, AllowanceError, DataKey, Frequency};
 
 #[contract]
 pub struct AllowancesContract;
