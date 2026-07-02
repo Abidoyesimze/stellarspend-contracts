@@ -8,7 +8,7 @@ This contract provides a comprehensive RBAC implementation that can be used acro
 
 ## Features
 
-- **Multiple Role Support**: Admin, User, Operator, and Auditor roles
+<!-- - **Multiple Role Support**: Admin, User, Operator, and Auditor roles -->
 - **Hierarchical Permissions**: Admin has super-user privileges
 - **Role Management**: Grant and revoke roles dynamically
 - **Admin Transfer**: Securely transfer admin privileges
