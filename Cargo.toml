@@ -72,6 +72,8 @@ name = "concurrent_spending_tests"
 path = "contracts/tests/concurrent_spending_tests.rs"
 
 [[test]]
+name = "storage_key_audit"
+path = "contracts/tests/storage_key_audit.rs"
 name = "savings_goals_test"
 path = "contracts/tests/savings_goals_test.rs"
 

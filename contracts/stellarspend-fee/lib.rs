@@ -1,4 +1,5 @@
-#![allow(unused)]
+#![no_std]
+#![allow(dead_code)]
 
 /// StellarSpend fee contract crate root: re-exports the fee contract and contract metrics types.
 pub mod auth;
