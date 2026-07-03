@@ -97,6 +97,7 @@ pub struct BudgetRecord {
     pub last_updated: u64,
     pub expires_at: Option<u64>,
     pub is_active: bool,
+    pub is_archived: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -333,6 +334,7 @@ impl BudgetContract {
             last_updated: current_time,
             expires_at,
             is_active,
+            is_archived: false,
         };
 
         // OPTIMIZATION: Write to the correct key in a single branch; avoid
