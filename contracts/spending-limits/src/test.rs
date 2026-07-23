@@ -3,6 +3,7 @@
 #![cfg(test)]
 
 extern crate alloc;
+extern crate std;
 
 use crate::{SpendingLimitsContract, SpendingLimitsContractClient};
 use soroban_sdk::{

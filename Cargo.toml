@@ -24,6 +24,7 @@ members = [
     "contracts/access-control",
     "contracts/category-analytics",
     "contracts/spending-categories",
+    "contracts/spending-rules",
     "contracts/user",
     "contracts/users",
     "contracts/activity-feed",
@@ -74,6 +75,8 @@ path = "contracts/tests/concurrent_spending_tests.rs"
 [[test]]
 name = "storage_key_audit"
 path = "contracts/tests/storage_key_audit.rs"
+
+[[test]]
 name = "savings_goals_test"
 path = "contracts/tests/savings_goals_test.rs"
 

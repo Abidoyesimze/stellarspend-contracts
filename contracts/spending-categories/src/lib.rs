@@ -293,6 +293,16 @@ impl SpendingCategoriesContract {
             .unwrap_or(Vec::new(&env))
     }
 
+    /// Returns true when the user has a category with the supplied name.
+    ///
+    /// This is intentionally read-only so composition contracts can validate
+    /// category-aware spending rules without duplicating category storage.
+    pub fn category_exists(env: Env, user: Address, name: Symbol) -> bool {
+        env.storage()
+            .persistent()
+            .has(&DataKey::CategoryByName(user, name))
+    }
+
     /// Returns the admin address.
     pub fn get_admin(env: Env) -> Address {
         env.storage()
