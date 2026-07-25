@@ -237,7 +237,7 @@ stellarspend-contracts/
 
 ## Contributing
 
-StellarSpend is an active open source project. We welcome contributors of all levels.
+StellarSpend is an active open source project. We welcome contributors of all levels. Please refer to [CONTRIBUTING.md](CONTRIBUTING.md) for our full module-ownership map and known module overlap documentation.
 
 ### Good First Issues
 
