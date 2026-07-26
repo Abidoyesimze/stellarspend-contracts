@@ -103,7 +103,7 @@ license = "MIT"
 repository = "https://github.com/stellarspend/stellarspend-contracts"
 
 [workspace.dependencies]
-soroban-sdk = "22.0.0"
+soroban-sdk = "=22.0.0"
 shared = { path = "contracts/shared" }
 
 [profile.release]
