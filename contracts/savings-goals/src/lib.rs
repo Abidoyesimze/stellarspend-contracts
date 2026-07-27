@@ -28,6 +28,7 @@ mod validation;
 use soroban_sdk::{
     contract, contractimpl, panic_with_error, symbol_short, Address, Bytes, Env, Symbol, Vec,
 };
+use penalty::PenaltyContractClient;
 
 pub use crate::types::{
     BatchGoalMetrics, BatchGoalResult, BatchMilestoneMetrics, BatchMilestoneResult,
@@ -832,7 +833,13 @@ impl SavingsGoalsContract {
         let penalty = if goal.is_complete {
             0
         } else {
-            (amount * goal.penalty_bps as i128) / 10_000
+            let penalty_contract: Address = env
+                .storage()
+                .instance()
+                .get(&DataKey::PenaltyContract)
+                .expect("penalty contract not configured");
+            let client = PenaltyContractClient::new(&env, &penalty_contract);
+            client.calculate_penalty_fee_with_bps(&amount, &goal.penalty_bps)
         };
         let gross_amount = amount.checked_add(penalty).unwrap_or(i128::MAX);
 
@@ -995,7 +1002,13 @@ impl SavingsGoalsContract {
         let penalty = if goal.is_complete {
             0
         } else {
-            (amount * goal.penalty_bps as i128) / 10_000
+            let penalty_contract: Address = env
+                .storage()
+                .instance()
+                .get(&DataKey::PenaltyContract)
+                .expect("penalty contract not configured");
+            let client = PenaltyContractClient::new(&env, &penalty_contract);
+            client.calculate_penalty_fee_with_bps(&amount, &goal.penalty_bps)
         };
         let gross_amount = amount.checked_add(penalty).unwrap_or(i128::MAX);
 
@@ -1355,6 +1368,16 @@ impl SavingsGoalsContract {
         Self::require_admin(&env, &current_admin);
 
         env.storage().instance().set(&DataKey::Admin, &new_admin);
+    }
+
+    /// Sets the penalty contract address for early-withdrawal fee calculation.
+    /// May only be called by the admin.
+    pub fn set_penalty_contract(env: Env, caller: Address, penalty_contract: Address) {
+        caller.require_auth();
+        Self::require_admin(&env, &caller);
+        env.storage()
+            .instance()
+            .set(&DataKey::PenaltyContract, &penalty_contract);
     }
 
     /// Returns the last created batch ID.

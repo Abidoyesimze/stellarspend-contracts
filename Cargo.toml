@@ -37,6 +37,8 @@ members = [
     "contracts/pausable",
     "contracts/allowances",
     "contracts/rewards",
+    "contracts/admin",
+    "contracts/penalty",
 ]
 
 [package]
@@ -74,6 +76,8 @@ path = "contracts/tests/concurrent_spending_tests.rs"
 [[test]]
 name = "storage_key_audit"
 path = "contracts/tests/storage_key_audit.rs"
+
+[[test]]
 name = "savings_goals_test"
 path = "contracts/tests/savings_goals_test.rs"
 
