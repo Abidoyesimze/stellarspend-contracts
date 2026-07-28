@@ -89,3 +89,27 @@ mod tests {
         assert!(quiz.is_active);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create_quiz() {
+        let quiz = Quiz {
+            quiz_id: 1,
+            lesson_id: 10,
+            passing_score: 70,
+            maximum_score: 100,
+            reward_points: 50,
+            is_active: true,
+        };
+
+        assert_eq!(quiz.quiz_id, 1);
+        assert_eq!(quiz.lesson_id, 10);
+        assert_eq!(quiz.passing_score, 70);
+        assert_eq!(quiz.maximum_score, 100);
+        assert_eq!(quiz.reward_points, 50);
+        assert!(quiz.is_active);
+    }
+}
