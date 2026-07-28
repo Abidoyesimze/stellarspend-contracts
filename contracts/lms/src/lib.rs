@@ -6,3 +6,5 @@ mod contract;
 mod test;
 
 pub use contract::*;
+
+pub mod errors;
