@@ -40,3 +40,28 @@ fn test_create_module() {
     assert_eq!(module.lesson_ids.get(1), Some(2));
     assert_eq!(module.lesson_ids.get(2), Some(3));
 }
+
+use soroban_sdk::{Env, String};
+
+use crate::Lesson;
+
+#[test]
+fn test_create_lesson() {
+    let env = Env::default();
+
+    let lesson = Lesson {
+        lesson_id: 1,
+        course_id: 100,
+        title: String::from_str(&env, "Introduction"),
+        description: String::from_str(&env, "Welcome to the course"),
+        content_uri: String::from_str(&env, "ipfs://QmLessonHash"),
+        estimated_duration: 30,
+        lesson_order: 1,
+    };
+
+    assert_eq!(lesson.lesson_id, 1);
+    assert_eq!(lesson.course_id, 100);
+    assert_eq!(lesson.title, String::from_str(&env, "Introduction"));
+    assert_eq!(lesson.estimated_duration, 30);
+    assert_eq!(lesson.lesson_order, 1);
+}

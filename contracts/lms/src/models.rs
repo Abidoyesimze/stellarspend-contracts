@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, String};
+use soroban_sdk::{contracttype, Address, String, Vec};
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -15,8 +15,6 @@ pub struct Course {
     pub updated_at: u64,
 }
 
-use soroban_sdk::{contracttype, Address, String, Vec};
-
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Module {
@@ -25,4 +23,16 @@ pub struct Module {
     pub title: String,
     pub lesson_ids: Vec<u64>,
     pub display_order: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Lesson {
+    pub lesson_id: u64,
+    pub course_id: u64,
+    pub title: String,
+    pub description: String,
+    pub content_uri: String,
+    pub estimated_duration: u32,
+    pub lesson_order: u32,
 }
