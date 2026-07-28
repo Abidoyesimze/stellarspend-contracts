@@ -108,3 +108,6 @@ impl AssetControlContract {
         }
     }
 }
+
+#[cfg(test)]
+mod test;
