@@ -298,6 +298,8 @@ pub enum DataKey {
     GoalDeadlineAlertSent(u64, u64),
     /// Certificate for completed goal (goal_id -> GoalCertificate)
     Certificate(u64),
+    /// Penalty contract address for early-withdrawal fee calculation
+    PenaltyContract,
 }
 
 /// Error codes for goal validation and creation.

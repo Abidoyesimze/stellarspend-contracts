@@ -39,6 +39,8 @@ members = [
     "contracts/pausable",
     "contracts/allowances",
     "contracts/rewards",
+    "contracts/admin",
+    "contracts/penalty",
 ]
 
 [package]

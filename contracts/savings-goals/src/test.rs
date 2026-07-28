@@ -4,6 +4,7 @@
 
 use crate::{SavingsGoalsContract, SavingsGoalsContractClient};
 use soroban_sdk::{testutils::Address as _, testutils::Ledger, Address, Bytes, Env, Symbol, Vec};
+use penalty::{PenaltyContract, PenaltyContractClient};
 
 use crate::types::{
     ErrorCode, GoalResult, MilestoneAchievementRequest, MilestoneResult, SavingsGoalRequest,
@@ -14,11 +15,21 @@ fn setup_test_contract() -> (Env, Address, SavingsGoalsContractClient<'static>) 
     let env = Env::default();
     env.mock_all_auths();
 
+    // Register and configure penalty contract
+    let penalty_id = env.register(PenaltyContract, ());
+    let penalty_client = PenaltyContractClient::new(&env, &penalty_id);
+    let penalty_admin = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    penalty_client.initialize(&penalty_admin, &10, &treasury);
+
     let contract_id = env.register(SavingsGoalsContract, ());
     let client = SavingsGoalsContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
     client.initialize(&admin);
+
+    // Wire penalty contract into savings-goals
+    client.set_penalty_contract(&admin, &penalty_id);
 
     (env, admin, client)
 }
