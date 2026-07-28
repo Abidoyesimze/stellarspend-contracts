@@ -25,6 +25,7 @@ members = [
     "contracts/category-analytics",
     "contracts/spending-policy",
     "contracts/spending-categories",
+    "contracts/spending-rules",
     "contracts/user",
     "contracts/users",
     "contracts/activity-feed",

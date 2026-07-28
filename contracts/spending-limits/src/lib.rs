@@ -515,6 +515,97 @@ impl SpendingLimitsContract {
             .set(&DataKey::SpendingLimit(user), &limit);
     }
 
+    /// Read-only cross-contract guard for composed policy engines.
+    ///
+    /// This mirrors `enforce_spending_limit` limit math and whitelist/category
+    /// bypass behavior, but does not mutate usage. Callers that compose multiple
+    /// policies can first check every rule, then call `enforce_spending_limit`
+    /// only after the whole transaction is approved.
+    pub fn check_spending_limit(
+        env: Env,
+        user: Address,
+        amount: i128,
+        category: Option<Symbol>,
+    ) -> bool {
+        if amount <= 0 {
+            return false;
+        }
+
+        if let Some(ref cat) = category {
+            if Self::is_exempt_internal(&env, &user, cat) {
+                return true;
+            }
+        }
+
+        if !Self::is_destination_whitelisted_internal(&env, &user) {
+            return false;
+        }
+
+        let limit: SpendingLimit = match env
+            .storage()
+            .persistent()
+            .get(&DataKey::SpendingLimit(user.clone()))
+        {
+            Some(l) => l,
+            None => return true,
+        };
+
+        if !limit.is_active {
+            return true;
+        }
+
+        let now = env.ledger().timestamp();
+        const SECONDS_PER_HOUR: u64 = 3600;
+        const SECONDS_PER_DAY: u64 = 86_400;
+        const SECONDS_PER_MONTH: u64 = SECONDS_PER_DAY * 30;
+
+        let hourly_window_id = if now == 0 {
+            0
+        } else {
+            (now - 1) / SECONDS_PER_HOUR
+        };
+        let daily_window_id = if now == 0 {
+            0
+        } else {
+            (now - 1) / SECONDS_PER_DAY
+        };
+        let month_id = if now == 0 {
+            0
+        } else {
+            (now - 1) / SECONDS_PER_MONTH
+        };
+
+        let current_hourly: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::HourlySpending(user.clone(), hourly_window_id))
+            .unwrap_or(0);
+        let current_daily: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::DailySpending(user.clone(), daily_window_id))
+            .unwrap_or(0);
+        let current_monthly: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MonthlySpending(user, month_id))
+            .unwrap_or(0);
+
+        let Some(new_hourly) = current_hourly.checked_add(amount) else {
+            return false;
+        };
+        let Some(new_daily) = current_daily.checked_add(amount) else {
+            return false;
+        };
+        let Some(new_monthly) = current_monthly.checked_add(amount) else {
+            return false;
+        };
+
+        new_hourly <= limit.hourly_limit
+            && new_daily <= limit.daily_limit
+            && new_monthly <= limit.monthly_limit
+    }
+
     /// Records an admin-approved emergency spending override on-chain.
     ///
     /// Requires the admin's signature (`require_auth`) so the override cannot be
